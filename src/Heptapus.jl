@@ -1,6 +1,6 @@
 module Heptapus
 
-using TypedTables, CSV, CUDAdrv
+using TypedTables, CSV, CUDAdrv, CUDAnative, CuArrays
 
 export empiricalbandwidth, Roofline
 
@@ -8,10 +8,19 @@ export empiricalbandwidth, Roofline
     empiricalbandwidth(nbytes=2*1024^3; devicenumber=0, numtests=10)
 
 Compute the emperical bandwidth in GB/s of a CUDA device using `nbytes` of
-memory.  The device to test can be slected with `devicenumber` and the
+memory.  The device to test can be selected with `devicenumber` and the
 bandwidth is an average of `ntests`.
 """
-function empiricalbandwidth(nbytes=2*1024^3; devicenumber=0, ntests=10)
+function empiricalbandwidth(nbytes=2*1024^3; devicenumber=0, ntests=10,
+                            use_memcpy=false)
+  if use_memcpy
+    return empiricalbandwidth_memcpy(nbytes, devicenumber, ntests)
+  else
+    return empiricalbandwidth_kernel(nbytes, devicenumber, ntests)
+  end
+end
+
+function empiricalbandwidth_memcpy(nbytes, devicenumber, ntests)
     dev = CuDevice(devicenumber)
     ctx = CuContext(dev)
 
@@ -33,6 +42,40 @@ function empiricalbandwidth(nbytes=2*1024^3; devicenumber=0, ntests=10)
     bandwidth = 2*nbytes*ntests/(t*1e9)
 end
 
+function bandwidth_kernel!(a, b, c, d)
+  i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+  if i <= length(a)
+    @inbounds a[i] = CUDAnative.fma(b[i], c[i], d[i])
+  end
+  nothing
+end
+
+function empiricalbandwidth_kernel(nbytes, devicenumber, ntests)
+    T = Float32
+
+    quarter_nbytes = nbytes ÷ 4
+    nelems = quarter_nbytes ÷ sizeof(T)
+    a = ntuple(_ -> CuArray{T}(undef, nelems), 4)
+
+    threads = 1024
+    blocks = (nelems + threads - 1) ÷ threads
+
+    @cuda threads=threads blocks=blocks bandwidth_kernel!(a[1], a[2], a[3], a[4])
+    @cuda threads=threads blocks=blocks bandwidth_kernel!(a[2], a[3], a[4], a[1])
+    @cuda threads=threads blocks=blocks bandwidth_kernel!(a[3], a[4], a[1], a[2])
+    @cuda threads=threads blocks=blocks bandwidth_kernel!(a[4], a[1], a[2], a[3])
+
+    t = CUDAdrv.@elapsed for n = 1:ntests
+      @cuda threads=threads blocks=blocks bandwidth_kernel!(a[1], a[2], a[3], a[4])
+      @cuda threads=threads blocks=blocks bandwidth_kernel!(a[2], a[3], a[4], a[1])
+      @cuda threads=threads blocks=blocks bandwidth_kernel!(a[3], a[4], a[1], a[2])
+      @cuda threads=threads blocks=blocks bandwidth_kernel!(a[4], a[1], a[2], a[3])
+    end
+
+    CuArrays.unsafe_free!.(a)
+
+    bandwidth = 4nbytes*ntests/(t*1e9)
+end
 
 """
     Roofline(command::Cmd)
@@ -51,7 +94,7 @@ Use `nvprof` to profile `command` and compute for each kernel executed:
 struct Roofline
     t::Table
 
-    function Roofline(command::Cmd)
+    function Roofline(command::Cmd; use_memcpy_bandwidth=false)
         s = mktemp() do f, _
             metrics = [:dram_write_bytes,
                        :dram_read_bytes,
@@ -100,7 +143,7 @@ struct Roofline
         # get average kernel execution time in seconds
         gettime(k) = t[map(row -> row.Name == matching_kernel[k], t)][1].Avg/1e3
 
-        eb = empiricalbandwidth()
+        eb = empiricalbandwidth(use_memcpy=use_memcpy_bandwidth)
         @info "Maximum empirical bandwidth $eb (GB/s)"
 
         maxempiricalbandwidth = fill(eb, length(kernels))
@@ -163,7 +206,8 @@ struct Roofline
             performance[i] = (flops/elapsedtime)/1e9
             maxgflopsestimate[i] = 100performance[i]/flop_efficiency[p]
 
-            kernelmaxempiricalbandwidth[i] = empiricalbandwidth(bytes)
+            kernelmaxempiricalbandwidth[i] =
+              empiricalbandwidth(bytes, use_memcpy=use_memcpy_bandwidth)
         end
 
         new(Table(kernels = kernels,
