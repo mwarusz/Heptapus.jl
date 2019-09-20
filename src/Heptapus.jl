@@ -72,19 +72,26 @@ struct Roofline
         end
 
         t = mktemp() do f, _
-            cmd = `nvprof -u ms --csv --log-file $f $command`
+            cmd = `nvprof --print-gpu-summary -u ms --csv --log-file $f $command`
             @info "Getting timings" cmd
             run(cmd)
             Table(CSV.File(f, comment="=", allowmissing=:none, datarow=3))
         end
 
-        kernels = unique(s.Kernel)
+        kernels, matching_kernel = let
+          kernels_t = unique(t.Name)
+          kernels_s = unique(s.Kernel)
 
-        @info "Kernels found in timings" kernels
-        @info "Kernels found in measurements" unique(t.Name)
+          @info "Kernels found in timings" kernels_t
+          @info "Kernels found in measurements" kernels_s
 
-        if !(kernels ⊆ unique(t.Name))
-          error("Kernel names do not match")
+          # remove CUDA memcpy/memset from timings
+          filter!(s -> !occursin("[CUDA", s), kernels_t)
+
+          # match kernels found in timings and measurements based on
+          # lexicographical sorting
+          matching_kernel = Dict(zip(sort(kernels_s), sort(kernels_t)))
+          kernels_s, matching_kernel
         end
 
         getmetric(T, k, m; trim=0) =
@@ -93,7 +100,7 @@ struct Roofline
                            s)][1].Avg[1:end-trim])
 
         # get average kernel execution time in seconds
-        gettime(k) = t[map(row -> row.Name == k, t)][1].Avg/1e3
+        gettime(k) = t[map(row -> row.Name == matching_kernel[k], t)][1].Avg/1e3
 
         eb = empiricalbandwidth()
         @info "Maximum empirical bandwidth $eb (GB/s)"
