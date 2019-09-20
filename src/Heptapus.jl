@@ -53,9 +53,7 @@ struct Roofline
 
     function Roofline(command::Cmd)
         s = mktemp() do f, _
-            metrics = [:dram_read_throughput,
-                       :dram_write_throughput,
-                       :dram_write_transactions,
+            metrics = [:dram_write_transactions,
                        :dram_read_transactions,
                        :local_load_transactions,
                        :local_store_transactions,
@@ -116,9 +114,6 @@ struct Roofline
 
         @info "Computing results"
         for (i, k) in enumerate(kernels)
-            dram_write_throughput = getmetric(Float64, k, :dram_write_throughput, trim=4)
-            dram_read_throughput = getmetric(Float64, k, :dram_read_throughput, trim=4)
-
             dram_write_transactions = getmetric(Int64, k, :dram_write_transactions)
             dram_read_transactions = getmetric(Int64, k, :dram_read_transactions)
 
