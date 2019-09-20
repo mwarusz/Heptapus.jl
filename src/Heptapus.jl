@@ -15,15 +15,16 @@ function empiricalbandwidth(nbytes=2*1024^3; devicenumber=0, ntests=10)
     dev = CuDevice(devicenumber)
     ctx = CuContext(dev)
 
-    a = Mem.alloc(nbytes÷2)
-    b = Mem.alloc(nbytes÷2)
+    a = Mem.alloc(Mem.Device, nbytes÷2)
+    b = Mem.alloc(Mem.Device, nbytes÷2)
 
-    Mem.transfer!(a, b, nbytes÷2, async=true)
-    Mem.transfer!(b, a, nbytes÷2, async=true)
+    stream = CuStream()
+    Mem.copy!(a, b, nbytes÷2, async=true, stream=stream)
+    Mem.copy!(b, a, nbytes÷2, async=true, stream=stream)
 
     t = CUDAdrv.@elapsed for n = 1:ntests
-        Mem.transfer!(a, b, nbytes÷2, async=true)
-        Mem.transfer!(b, a, nbytes÷2, async=true)
+        Mem.copy!(a, b, nbytes÷2, async=true, stream=stream)
+        Mem.copy!(b, a, nbytes÷2, async=true, stream=stream)
     end
 
     Mem.free(a)
