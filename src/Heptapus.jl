@@ -53,8 +53,8 @@ struct Roofline
 
     function Roofline(command::Cmd)
         s = mktemp() do f, _
-            metrics = [:dram_write_transactions,
-                       :dram_read_transactions,
+            metrics = [:dram_write_bytes,
+                       :dram_read_bytes,
                        :local_load_transactions,
                        :local_store_transactions,
                        :flop_hp_efficiency,
@@ -114,8 +114,8 @@ struct Roofline
 
         @info "Computing results"
         for (i, k) in enumerate(kernels)
-            dram_write_transactions = getmetric(Int64, k, :dram_write_transactions)
-            dram_read_transactions = getmetric(Int64, k, :dram_read_transactions)
+            dram_write_bytes = getmetric(Int64, k, :dram_write_bytes)
+            dram_read_bytes = getmetric(Int64, k, :dram_read_bytes)
 
             local_load_transactions = getmetric(Int64, k, :local_load_transactions)
             local_store_transactions = getmetric(Int64, k, :local_store_transactions)
@@ -154,8 +154,7 @@ struct Roofline
             p = argmax(flop_count)
             floptype[i] = (hp=Float16, sp=Float32, dp=Float64)[p]
 
-            # Note that each transaction is 32 bytes
-            bytes = 32(dram_write_transactions + dram_read_transactions)
+            bytes = dram_write_bytes + dram_read_bytes
             flops = flop_count[p]
 
             arithmeticintensity[i] = flops/bytes
