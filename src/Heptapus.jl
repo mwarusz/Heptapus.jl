@@ -13,11 +13,11 @@ bandwidth is an average of `ntests`.
 """
 function empiricalbandwidth(nbytes=2*1024^3; devicenumber=0, ntests=10,
                             use_memcpy=false)
-  if use_memcpy
-    return empiricalbandwidth_memcpy(nbytes, devicenumber, ntests)
-  else
-    return empiricalbandwidth_kernel(nbytes, devicenumber, ntests)
-  end
+    if use_memcpy
+        return empiricalbandwidth_memcpy(nbytes, devicenumber, ntests)
+    else
+        return empiricalbandwidth_kernel(nbytes, devicenumber, ntests)
+    end
 end
 
 function empiricalbandwidth_memcpy(nbytes, devicenumber, ntests)
@@ -43,11 +43,11 @@ function empiricalbandwidth_memcpy(nbytes, devicenumber, ntests)
 end
 
 function bandwidth_kernel!(a, b, c, d)
-  i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-  if i <= length(a)
-    @inbounds a[i] = CUDAnative.fma(b[i], c[i], d[i])
-  end
-  nothing
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    if i <= length(a)
+        @inbounds a[i] = CUDAnative.fma(b[i], c[i], d[i])
+    end
+    nothing
 end
 
 function empiricalbandwidth_kernel(nbytes, devicenumber, ntests)
@@ -66,10 +66,10 @@ function empiricalbandwidth_kernel(nbytes, devicenumber, ntests)
     @cuda threads=threads blocks=blocks bandwidth_kernel!(a[4], a[1], a[2], a[3])
 
     t = CUDAdrv.@elapsed for n = 1:ntests
-      @cuda threads=threads blocks=blocks bandwidth_kernel!(a[1], a[2], a[3], a[4])
-      @cuda threads=threads blocks=blocks bandwidth_kernel!(a[2], a[3], a[4], a[1])
-      @cuda threads=threads blocks=blocks bandwidth_kernel!(a[3], a[4], a[1], a[2])
-      @cuda threads=threads blocks=blocks bandwidth_kernel!(a[4], a[1], a[2], a[3])
+        @cuda threads=threads blocks=blocks bandwidth_kernel!(a[1], a[2], a[3], a[4])
+        @cuda threads=threads blocks=blocks bandwidth_kernel!(a[2], a[3], a[4], a[1])
+        @cuda threads=threads blocks=blocks bandwidth_kernel!(a[3], a[4], a[1], a[2])
+        @cuda threads=threads blocks=blocks bandwidth_kernel!(a[4], a[1], a[2], a[3])
     end
 
     CuArrays.unsafe_free!.(a)
@@ -94,7 +94,8 @@ Use `nvprof` to profile `command` and compute for each kernel executed:
 struct Roofline
     t::Table
 
-    function Roofline(command::Cmd; use_memcpy_bandwidth=false)
+    function Roofline(command::Cmd; use_memcpy_bandwidth=false, profile_from_start=true)
+        from_start = profile_from_start ? `` : `--profile-from-start off`
         s = mktemp() do f, _
             metrics = [:dram_write_bytes,
                        :dram_read_bytes,
@@ -106,33 +107,33 @@ struct Roofline
                        :flop_count_hp,
                        :flop_count_sp,
                        :flop_count_dp]
-            cmd = `nvprof -u ms --csv --metrics $(join(metrics,",")) --log-file $f $command`
+            cmd = `nvprof $from_start -u ms --csv --metrics $(join(metrics,",")) --log-file $f $command`
             @info "Getting metrics" cmd
             run(cmd)
             Table(CSV.File(f, comment="=", allowmissing=:none))
         end
 
         t = mktemp() do f, _
-            cmd = `nvprof --print-gpu-summary -u ms --csv --log-file $f $command`
+            cmd = `nvprof $from_start --print-gpu-summary -u ms --csv --log-file $f $command`
             @info "Getting timings" cmd
             run(cmd)
             Table(CSV.File(f, comment="=", allowmissing=:none, datarow=3))
         end
 
         kernels, matching_kernel = let
-          kernels_t = unique(t.Name)
-          kernels_s = unique(s.Kernel)
+            kernels_t = unique(t.Name)
+            kernels_s = unique(s.Kernel)
 
-          @info "Kernels found in timings" kernels_t
-          @info "Kernels found in measurements" kernels_s
+            @info "Kernels found in timings" kernels_t
+            @info "Kernels found in measurements" kernels_s
 
-          # remove CUDA memcpy/memset from timings
-          filter!(s -> !occursin("[CUDA", s), kernels_t)
+            # remove CUDA memcpy/memset from timings
+            filter!(s -> !occursin("[CUDA", s), kernels_t)
 
-          # match kernels found in timings and measurements based on
-          # lexicographical sorting
-          matching_kernel = Dict(zip(sort(kernels_s), sort(kernels_t)))
-          kernels_s, matching_kernel
+            # match kernels found in timings and measurements based on
+            # lexicographical sorting
+            matching_kernel = Dict(zip(sort(kernels_s), sort(kernels_t)))
+            kernels_s, matching_kernel
         end
 
         getmetric(T, k, m; trim=0) =
